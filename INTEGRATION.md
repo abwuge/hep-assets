@@ -1,6 +1,23 @@
 # AMS 通量分析接入 SCP
 
-建议先把已完成的 demo 封装成一个可异步调用的科研工具，打通 SCP 的发现、执行和结果读取；随后使用独立题包评测智能体。ROOT 计算继续使用现成的 Runtime_Environment，SCP 负责连接和调用，两者无需合并成一个运行环境。
+`ams_flux_server/` 将已完成的 demo 封装为异步科研工具。SCP SDK 负责工具发现和调用，独立子进程使用现成的科学环境运行分析；原有 demo 计算代码保持不变。
+
+## 启动服务
+
+本机已安装科学环境。安装适配层时使用独立虚拟环境：
+
+```sh
+cd /Users/wuhanxun/project/ams-flux-scp
+.runtime/ams-flux/bin/python -m venv .venv-scp
+.venv-scp/bin/python -m pip install -e .
+.venv-scp/bin/ams-flux-server
+```
+
+已安装后只需执行最后一条命令。服务默认监听 `http://127.0.0.1:8000/sse`。SDK 依赖固定到下文核对的提交；其依赖不进入科学环境。其他机器在项目根目录执行相同安装命令，先按运行环境说明安装科学环境。
+
+配置集中在启动参数：`--project` 指定材料根目录，`--runtime` 指定科学环境前缀，`--runs` 指定作业存储目录，`--host` 和 `--port` 指定监听地址。默认使用本项目、`.runtime/ams-flux`、`runs/` 和本机 8000 端口。
+
+作业保存在 `runs/<job_id>/`，默认一次运行一个分析或验收作业。关闭客户端或重启 Server 不停止后台计算；重新连接后使用原 `job_id` 查询。`cancel_job` 会停止该作业的整个进程组。重启后失去 worker 的未完成作业会报告失败。分析成功与验收通过分别记录。
 
 ## 现有材料分别承担什么角色
 
@@ -10,6 +27,8 @@
 | `demo_agent_task/submission/` | 已完成的参考解，含实现、九个分析子目录、ROOT 结果、报告和验收程序。用于接入联调和参考检查。 |
 | `Runtime_Environment/` | Python 3.13.5、NumPy 2.2.6、ROOT 6.34.10，含 PyROOT/RooFit。提供原生 Apple Silicon 离线环境与 Linux 两种架构的 Docker 镜像。 |
 | `source_materials/` | 从微信目录复制的原始文件，保留两个 ZIP 和项目介绍 PDF。 |
+
+Git 跟踪代码、题包数据、参考结果和安装说明；原始 ZIP、环境压缩包、已安装环境和作业输出不入库。迁移到其他机器时需另外提供环境包，或使用运行环境中的在线安装入口。
 
 项目介绍 PDF 第 2–3 页明确区分了题包、Codex 完成的参考解与运行环境。科学工作从六个现成的 ROOT 文件开始，不需要重新生产原始事件或运行全探测器模拟。PDF 最后提出的五类场景是扩展方向；本次可接入的具体示例是正负电子联合通量重建。
 
@@ -31,15 +50,15 @@ Runtime_Environment 中的 Python / ROOT
 ROOT 结果、REPORT.md、运行日志、验收结果
 ```
 
-开发时先让客户端直接连 Server 的 `/sse`，验证工具发现和调用，再注册到 Hub，便于区分分析执行问题与 Hub 配置问题。默认只监听本机；跨机器接入时再部署受认证和访问控制保护的服务。
+客户端可直接连 Server 的 `/sse`，也可经 Hub 发现和调用工具。默认只监听本机；跨机器接入时需要部署受认证和访问控制保护的服务。
 
 SCP 仓库已有 MCP 风格的服务封装：`from scp.server.fastmcp import FastMCP`、`@server.tool()`、`server.run(transport="sse")`。所核对版本的 `FastMCP.run()` 支持 `stdio` 和 `sse`；这里选择 Hub 已实现调用分支的 SSE，不直接假定 `streamable-http` 启动参数可用。
 
 ### 为什么保留两个环境
 
 - SCP SDK 安装在单独虚拟环境，避免其依赖解析改变科学环境中的固定 NumPy 等版本。
-- Server 使用子进程调用原生科学环境，或通过 Docker 调用科学镜像。ROOT 对象留在计算进程中，协议层返回 JSON 摘要和产物标识。
-- 本地 Mac 联调可用原生离线环境；部署到 Linux 服务端推荐现有 Docker 镜像，并固定镜像 CPU 架构。跨架构浮点结果可能不同。
+- Server 使用子进程调用原生科学环境。ROOT 对象留在计算进程中，协议层返回 JSON 数值、图片和产物内容。
+- 配套 Docker 镜像用于独立执行 demo；适配层的 `--runtime` 指向原生科学环境前缀。
 
 SCP 官方的 `scp-code` 镜像用于智能体与 skills 工作流；这份材料没有表明它包含当前 demo 所需的精确 ROOT 环境，因此应保留提供的科学镜像。
 
@@ -77,42 +96,34 @@ docker run --rm --user "$(id -u):$(id -g)" \
   python -B submission/acceptance_check.py --replay
 ```
 
-直接运行上述命令会重新生成参考解中的结果。接入服务应在每次作业开始时将参考解复制到 `runs/<job_id>/demo_agent_task/`，再把该副本挂载为 `/workspace`，以保留分发的参考结果并隔离并发写入。不要将整个项目根目录挂载给被评测的智能体。
+直接运行上述命令会重新生成参考解中的结果。适配层使用原生科学环境，每次将 demo 复制到 `runs/<job_id>/submission/`，排除已有生成 ROOT 文件和运行记录，保留 `Data/` 中的 ROOT 输入；分析在该副本内执行。上述 Docker 命令用于独立运行，不是适配层的执行后端。不要将整个项目根目录挂载给被评测的智能体。
 
-原生环境也要通过 `bash -lc` 激活后再启动 `python -B submission/run.py`，使 runner 调用的 `root` 命令与 Python 来自同一科学环境；仅指定 Python 路径还不够。
+适配层同时指定科学环境的 Python 和 PATH，使 runner 调用的 `root` 来自同一环境。
 
-## 薄适配层需要提供哪些工具
+## 工具接口
 
-以下是建议新增的 AMS 接口，不是 SCP SDK 已内置的工具。
+这些工具由 `ams_flux_server/server.py` 注册，不是 SCP SDK 的内置科学工具。
 
 | 工具 | 输入 | 返回与行为 |
 | --- | --- | --- |
-| `describe_task` | 无 | 科学目标、任务版本、允许输入、约束与产物说明。 |
-| `start_demo` | 无 | 为参考解创建独立作业目录，启动完整 runner，立即返回 `job_id`。 |
-| `get_job` | `job_id` | `running/succeeded/failed/cancelled`、退出码、日志尾部和可读产物列表。成功由进程退出码和产物检查确定。 |
-| `start_validation` | 已完成的 `job_id`，是否重放 | 在同一作业目录启动验收子进程，返回独立的验收作业 ID。 |
-| `read_result` | `job_id`、产物标识 | 报告文本，或约定 ROOT 对象的类型、维度、数值和单位；大型 ROOT 文件通过受控下载或共享存储交付。 |
-| `cancel_job` | `job_id` | 停止该作业的进程组或容器，记录取消状态。 |
+| `describe_analysis` | 无 | 科学目标、任务版本、固定输入与产物说明。 |
+| `run_analysis` | 无 | 创建干净工作副本，启动完整 runner，快速返回 `job_id`。 |
+| `get_status` | `job_id` | 返回状态、阶段、退出码、日志尾部和产物列表；状态为 `queued/running/succeeded/failed/cancelled`。 |
+| `validate_job` | 分析的 `job_id`，`replay=false` | 对成功分析的工作副本启动验收，返回独立验收作业 ID。`replay=true` 额外执行两次干净重放。 |
+| `get_result` | `job_id`、`artifact="spectrum"` | 读取成功作业的 JSON 数值、报告、PNG 图片或 base64 ROOT 文件；验收作业可读取 `acceptance`。 |
+| `cancel_job` | `job_id` | 停止该作业的进程组，返回最终状态；已结束的作业保持原状态。 |
 
 启动计算必须短返回。当前仓库 `src/scp/hub/client_server.py` 的 `SSEClient.call_tool()` 有 **30 秒超时**，不应让一次工具调用同步等待完整 RooFit、误差传播或重放。超时也不能当作计算已经停止。
 
-首版使用后台子进程、作业记录和日志文件即可，无需另建复杂调度平台。作业记录应持久化 PID 或容器标识、工作目录、开始/结束时间与退出码；Server 重启后应重新核对进程状态，不能把内存中丢失的作业视为成功。
+`jobs.py` 创建作业、读取状态和取消进程组；独立的 `worker.py` 监督计算并原子保存最终状态。每个作业保存执行规格、worker PID、开始/结束时间、退出码和日志。worker 持有作业文件锁，Server 据此识别重启后仍在运行的作业。
 
-实现时创建 `FastMCP("AMSFlux", host="127.0.0.1", port=8000)`，使用 `@server.tool()` 注册上表的作业管理与结果读取函数，再用 `server.run(transport="sse")` 启动服务。
+Server 使用 `FastMCP("AMSFlux", host="127.0.0.1", port=8000)`、`@server.tool()` 和 `server.run(transport="sse")`。
 
 服务只执行固定的分析与验收入口，不接受来自客户端的任意 shell 字符串。`job_id` 映射到服务保存的工作目录；结果读取限制在该作业目录内。正式远程服务需要认证、作业归属检查和下载权限控制。
 
 ## 把 Server 注册到 SCP Hub
 
-先在独立环境安装所核对的 SCP 源码版本，再运行适配服务：
-
-```sh
-git clone https://github.com/InternScience/scp.git
-git -C scp checkout cea5398564032aea65a78e246d06c30ae945e03f
-python3 -m venv .venv-scp
-. .venv-scp/bin/activate
-python -m pip install -e ./scp
-```
+保持适配服务运行，再向已有 Hub 注册。
 
 对于运行在同一主机的**自托管 Hub**，以下是该版本源码的注册格式。`HUB_URL` 指向已启动的 Hub，例如 `http://127.0.0.1:46380`：
 
@@ -133,13 +144,13 @@ curl "$HUB_URL/tools?server_name=AMSFlux"
 
 curl -X POST "$HUB_URL/tools/call_tool" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"AMSFlux.start_demo"}'
+  -d '{"name":"AMSFlux.run_analysis"}'
 ```
 
 Hub 会拼接 `server_url:server_port/sse`，所以 `server_url` 不含端口和 `/sse`。调用时名称使用 `AMSFlux.<tool_name>`；工具参数与 `name` 放在同一层，例如查询状态：
 
 ```json
-{"name":"AMSFlux.get_job","job_id":"<returned-job-id>"}
+{"name":"AMSFlux.get_status","job_id":"<returned-job-id>"}
 ```
 
 这是自托管 Hub 的 HTTP 格式；直接使用 SCP ClientSession 时，`call_tool(name, arguments)` 是另一层接口。经当前 Hub 调用时结果是 content block 列表，客户端应读取其中的文本内容，再解析适配层返回的 JSON。
@@ -157,7 +168,19 @@ Hub 会拼接 `server_url:server_port/sse`，所以 `server_url` 不含端口和
 - `submission/REPORT.md`：总报告，各子目录 README 解释中间量及其用途。
 - `submission/run_records/`：计算日志、环境与运行记录；验收后含 `acceptance.json`。
 
-本机文件路径只有本机消费者能用。远程调用应返回受控产物 URL 或可继续通过 `read_result` 获取的标识，不能把 Mac 绝对路径当成远程下载地址。ROOT 文件保留为数值与可编辑图的权威产物；需要网页预览时另行渲染图像。
+`get_result` 不要求消费者访问本机路径。`artifact` 的可选值为：
+
+- `spectrum`：JSON，包含能量边界、代表能量、有效 bin 标记、两种通量及标准差、协方差、单位和不确定度范围。
+- `report`：Markdown 报告文本。
+- `spectrum_plot`、`spectrum_e3_plot`：SCP 原生 PNG 图片内容块，由科学环境读取已保存的 canvas 导出。
+- `root`：`results.root` 的 base64 内容、文件名和 MIME 类型，解码即可保存原始 ROOT 文件。
+- `acceptance`：验收作业的检查记录，使用 `validate_job` 返回的作业 ID。
+
+例如通过 Hub 读取结果：
+
+```json
+{"name":"AMSFlux.get_result","job_id":"<analysis-job-id>","artifact":"spectrum"}
+```
 
 ## 从重跑 demo 进入真正的智能体评测
 
@@ -171,7 +194,7 @@ Hub 会拼接 `server_url:server_port/sse`，所以 `server_url` 不含端口和
 Read README.md and TASK.md, complete and verify the analysis as instructed, and report the final result file paths and ROOT canvas names.
 ```
 
-评测应预先约定计算资源、时间/交互预算和网络策略。SCP 管理任务调用与产物；智能体需要另行具备代码执行和科研推理能力。只暴露 `start_demo` 能验证固定工作流的重现，不能验证智能体是否从题目完成分析。
+评测应预先约定计算资源、时间/交互预算和网络策略。SCP 管理任务调用与产物；智能体需要另行具备代码执行和科研推理能力。`run_analysis` 执行的是参考解固定工作流；从题目独立完成分析需要使用隔离的 `Agent_Task/` 工作区。
 
 科学验收重点包括：九个指定子项目、规定的模板拟合和选择效率方法、绝对触发效率中心修正只应用一次且按题意排除其不确定度、能量迁移处理、可独立执行的不确定度源、完整协方差，以及干净工作区可重放的最终谱。新生成的科学代码、文档和图注仍按题包要求使用英文。
 
@@ -185,7 +208,21 @@ Read README.md and TASK.md, complete and verify the analysis as instructed, and 
 4. 经 Hub 的同一工具调用路径可用，远程消费者能实际取得产物。
 5. 如用于能力评测，题包与参考解隔离，记录预算、版本、命令及独立验收结论。
 
-当前已完成材料整理、接入方案核对、原生科学环境安装和完整 demo 执行。SCP SDK、薄适配层和平台注册尚未实施；接入阶段从上表中的薄适配层开始。
+## 验证适配层
+
+快速检查作业隔离、失败退出码、取消进程组和状态恢复：
+
+```sh
+.venv-scp/bin/python -B -m unittest discover -s tests -v
+```
+
+使用真实 SDK、SSE 服务、Hub 和科学环境执行完整协议测试：
+
+```sh
+AMS_FLUX_INTEGRATION=1 .venv-scp/bin/python -B -m unittest discover -s tests -v
+```
+
+协议测试启动临时本机 Server 和自托管 Hub，验证工具发现、后台分析、Server 重启后查询、JSON/ROOT/PNG 结果读取、经 Hub 注册和调用、验收与两次干净重放，以及取消操作；结束后关闭测试服务并清理临时工作区。托管平台注册不属于本机测试。
 
 ## 核对来源
 
