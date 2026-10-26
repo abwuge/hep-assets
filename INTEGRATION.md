@@ -184,6 +184,73 @@ Hub 会拼接 `server_url:server_port/sse`，所以 `server_url` 不含端口和
 
 ## 从重跑 demo 进入真正的智能体评测
 
+### 标杆使用的六工具接口
+
+`task_server.py` 提供 `task_info`、`read_file`、`write_file`、`execute`、`poll_command` 和 `cancel_command`。相对路径以题包工作区为根，新分析写入 `submission/`。文本读取返回 `has_more` 和下一页位置；长命令快速返回命令 ID，通过 `poll_command` 读取后续日志和退出码。
+
+计算使用固定科学环境与 macOS `sandbox-exec`：题包输入只读，工作区可写，计算进程禁止联网，不继承客户端凭据；一次运行一条科学命令，数值库默认使用两个线程。Bash 使用普通 `-c` 执行；需要在失败时停止或传播管道错误时，由提交脚本显式设置 `set -e`、`set -o pipefail` 或检查退出码。
+
+本提交按标杆保存的工具目录、`task_info` 返回和调用记录，从后续工作流版本中拆回六工具实现；当时没有保存服务源码快照。检查点、诊断恢复、精确编辑和后续客户端调试参数不属于此标杆接口。
+
+### 原生 Codex 标杆
+
+`runs/codex-baseline/` 保存原始题包副本、独立解答、96 次工具调用、命令输出和主会话独立验收记录。解题器至最后一次工具调用耗时约 33 分 14 秒；十四个最终 bin 有效，曝光时间与接受度对照为 28/28，两次独立干净重放各有 877 个数值对象与最终候选完全一致。记录的模型标签为 `Codex clean subagent`，未单独保存精确模型版本。
+
+- 分析与干净启动入口：`runs/codex-baseline/task/submission/README.md`、`run_all.py`。
+- ROOT 对象索引：`runs/codex-baseline/task/submission/OBJECT_INDEX.md`。
+- 独立验收：`runs/codex-baseline/verification/independent_checks.json`。
+- 任务授权与访问约束：`runs/codex-baseline/prompt.txt`。
+
+启动新的标杆服务工作区：
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.benchmark_services \
+  --run runs/codex-new --minutes 60
+```
+
+该命令创建工作区并启动 Hub 和 Server，不会自动启动或选择模型。新的独立解题器只获得题包与本轮 Hub 传输权限，不获得旧标杆解答。使用启动输出的 Hub URL，通过 `benchmark_client` 发现工具：
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.benchmark_client \
+  --hub http://127.0.0.1:<hub-port> \
+  --record runs/codex-new/claude.jsonl list_tools
+```
+
+将 `list_tools` 换成未加 Server 前缀的工具名，并从 stdin 传入 JSON 参数，即可调用；传输桥在 Hub 请求中补齐 `AMSTask.` 前缀。计算仍由 Server 执行。服务在限时结束或该轮目录出现 `.stop` 时关闭。
+
+### 通用 MCP 客户端接入
+
+本项目使用的自托管 Hub 对上暴露 HTTP 工具 API，对下通过 SSE 连接 AMSTask Server。`hub_client.py` 将 Hub 工具包装为标准 MCP stdio 接口：
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.hub_client \
+  --hub http://127.0.0.1:<hub-port> --server AMSTask
+```
+
+链路为 `MCP 客户端 → stdio 适配器 → Hub HTTP API → AMSTask SSE Server`。这层适配针对所选自托管 Hub；官方托管平台另有标准 MCP Endpoint，不应把本机接口视为所有 SCP 部署的统一接口。
+
+Claude 已配置模型 API 后，也可使用独立试验启动器；模型显式指定，避免混淆试验身份：
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.trial \
+  --run runs/selected-model --model <model-id> --minutes 60 --budget 0
+```
+
+启动器只提供 Hub 工具，关闭客户端内置工具及其他 MCP 连接，并保持 `--no-session-persistence`。试验保存提示词、配置、工具调用、命令及模型产物。`--budget 0` 关闭客户端估价限制，实际费用以 API 平台为准。`--resume-task` 可复制独立实现继续计算；`--feedback-file` 可提供已核实的问题。
+
+### 查看标杆记录
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.replay_server
+```
+
+打开 `http://127.0.0.1:8766`。本机只读服务自动发现 `runs/` 中的试验记录，每 5 秒更新。也可导出离线页面：
+
+```sh
+.venv-scp/bin/python -m ams_flux_server.trace_viewer \
+  runs/codex-baseline --output /tmp/codex-baseline-replay.html
+```
+
 接入联调完成后，新建独立的评测工作区，只放 `Agent_Task/` 的内容，并为智能体提供读取文件、编写代码和在科学环境中执行命令的受限能力。让它读取 README、TASK、指定方法和公开验收要求，自行实现分析。
 
 `Agent_Task` 不包含现成的顶层分析 runner，不能把参考解的 `run.py` 当作题包自带入口。也不要将 `demo_agent_task`、参考结果或本说明挂载到被评测智能体可读的范围；只在提示词里要求“不看”不能形成隔离。
