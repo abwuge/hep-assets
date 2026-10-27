@@ -1,5 +1,6 @@
 """Test Hub startup configuration and MCP forwarding through the official Hub."""
 
+import asyncio
 import importlib.util
 import os
 import socket
@@ -11,13 +12,12 @@ import unittest
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
-from scp import ClientSession, StdioServerParameters, types
+from scp import ClientSession, types
 from scp.client.sse import sse_client
-from scp.client.stdio import stdio_client
+from scp.client.streamable_http import streamablehttp_client
 from scp.server.fastmcp import FastMCP
 
 HUB_DIR = Path(__file__).resolve().parents[1]
@@ -53,31 +53,19 @@ def free_port() -> int:
 
 
 class StartupTests(unittest.TestCase):
-    def test_project_local_state_and_bind_address(self):
+    def test_server_side_endpoint_defaults(self):
         spec = importlib.util.spec_from_file_location("hub_run", HUB_DIR / "run.py")
         assert spec is not None and spec.loader is not None
         launcher = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(launcher)
-        upstream = ModuleType("scp.hub.hub_server")
         with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(launcher, "__file__", str(Path(directory) / "run.py")),
-            patch.dict(sys.modules, {"scp.hub.hub_server": upstream}),
-            patch.dict(os.environ),
-            patch.object(upstream, "run", create=True) as run,
+            patch.object(sys, "argv", ["run.py"]),
+            patch.object(launcher, "serve", new=Mock(return_value=None)) as serve,
+            patch.object(launcher.asyncio, "run") as run,
         ):
-            os.environ.pop("REDIS_HOST", None)
             launcher.main()
-            state = Path(directory).resolve() / ".local"
-            self.assertTrue(state.is_dir())
-            self.assertEqual(
-                os.environ["STORAGE_FILE_PATH"], str(state / "servers.json")
-            )
-            self.assertEqual(os.environ["REDIS_HOST"], "127.0.0.1")
-            run.assert_called_once_with(host="127.0.0.1", port=46380)
-            os.environ["REDIS_HOST"] = "configured-redis"
-            launcher.main()
-            self.assertEqual(os.environ["REDIS_HOST"], "configured-redis")
+            serve.assert_called_once_with("127.0.0.1", 46381, 46380, HUB_DIR / ".local")
+            run.assert_called_once()
 
 
 class ForwardingTests(unittest.IsolatedAsyncioTestCase):
@@ -102,7 +90,7 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
         while time.monotonic() < deadline and process.poll() is None:
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    return
+                    return process
             except OSError:
                 time.sleep(0.1)
         log.seek(0)
@@ -120,16 +108,23 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
             env,
         )
         port = free_port()
-        self.start_service(
+        self.mcp_port = free_port()
+        self.launcher = self.start_service(
             [
-                "-c",
-                "from scp.hub.hub_server import run; "
-                f"run(host='127.0.0.1', port={port})",
+                str(HUB_DIR / "run.py"),
+                "--hub-port",
+                str(port),
+                "--port",
+                str(self.mcp_port),
+                "--storage",
+                str(self.state.parent),
             ],
-            port,
+            self.mcp_port,
             env,
         )
+        self.hub_port = port
         self.hub = f"http://127.0.0.1:{port}"
+        self.mcp = f"http://127.0.0.1:{self.mcp_port}/mcp"
 
     async def asyncSetUp(self):
         async with httpx.AsyncClient(trust_env=False) as client:
@@ -148,12 +143,8 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
 
     @asynccontextmanager
     async def session(self):
-        parameters = StdioServerParameters(
-            command=sys.executable,
-            args=[str(HUB_DIR / "mcp_bridge.py"), "--hub", self.hub],
-        )
         async with (
-            stdio_client(parameters) as (read, write),
+            streamablehttp_client(self.mcp) as (read, write, _),
             ClientSession(
                 read, write, read_timeout_seconds=timedelta(seconds=15)
             ) as client,
@@ -199,6 +190,14 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.isError)
             self.assertEqual(result.content, original.content)
             self.assertIn("deliberate tool failure", str(result.content))
+
+    async def test_launcher_stops_internal_hub(self):
+        self.launcher.terminate()
+        await asyncio.to_thread(self.launcher.wait, 10)
+        for port in (self.hub_port, self.mcp_port):
+            with self.subTest(port=port), self.assertRaises(OSError):
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    pass
 
 
 if __name__ == "__main__":
