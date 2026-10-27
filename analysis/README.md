@@ -13,7 +13,7 @@
 
 ## 启动
 
-在 `hep-assets/` 目录启动 [Hub](../hub/README.md) 后运行：
+在项目根目录启动 [Hub](../hub/README.md) 后运行：
 
 ```sh
 uv run --locked --group analysis python -m analysis.server \

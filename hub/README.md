@@ -4,7 +4,7 @@
 
 ## 启动与连接
 
-在 `hep-assets/` 目录运行：
+在项目根目录运行：
 
 ```sh
 uv run --locked --group hub hub/run.py

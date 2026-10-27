@@ -1,22 +1,30 @@
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "ams-flux-server"
+name = "hep-assets"
 version = "0.1.0"
-description = "SCP tools for the AMS electron-plus-positron flux demo"
-requires-python = ">=3.10"
-dependencies = [
-  "Flask>=3.1,<4",
+description = "Knowledge, tools, models, data catalogs and workflows for high-energy physics"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+hub = [{ include-group = "scp" }]
+analysis = [
+  { include-group = "scp" },
+  "httpx>=0.28,<1",
+  "psutil>=7,<8",
+]
+scp = [
   "scp @ git+https://github.com/InternScience/scp.git@cea5398564032aea65a78e246d06c30ae945e03f",
-  # The SDK imports a Pydantic internal API; use its locked versions.
+  # The upstream SDK uses Pydantic internals from this release.
   "pydantic==2.10.1",
   "pydantic-settings==2.6.1",
 ]
 
-[project.scripts]
-ams-flux-server = "ams_flux_server.server:main"
+[tool.uv]
+required-version = ">=0.13.5"
+package = false
 
-[tool.setuptools.packages.find]
-include = ["ams_flux_server*"]
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

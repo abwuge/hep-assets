@@ -1,13 +1,9 @@
-.DS_Store
+# Virtual environment
+.venv/
+
+# Python cache
 __pycache__/
-*.py[cod]
-.runtime/
-.venv*/
-*.egg-info/
-build/
-dist/
-runs/
-demo_agent_task/submission/run_records/
-Runtime_Environment/**/*.tar.gz
-source_materials/**/*.zip
-.env
+
+# Tool caches and macOS metadata
+.ruff_cache/
+.DS_Store
