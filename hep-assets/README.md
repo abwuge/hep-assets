@@ -21,3 +21,4 @@ uv run --locked --group analysis python -m analysis.server \
 
 - [SCP Hub](hub/README.md)：工具注册、MCP 接入与部署配置。
 - [分析工作区](analysis/README.md)：运行环境、文件传输与任务管理。
+- [AMS 通量分析](flux/README.md)：原始 demo、输入数据与科学运行环境。
