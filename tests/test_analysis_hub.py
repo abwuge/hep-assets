@@ -93,11 +93,11 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.env = {**os.environ, "STORAGE_FILE_PATH": str(self.root / "servers.json")}
         self.assets = self.root / "assets"
         (self.assets / "data/demo_flux").mkdir(parents=True)
-        (self.assets / "references/demo_flux").mkdir(parents=True)
+        (self.assets / "knowledge/demo_flux").mkdir(parents=True)
         (self.assets / "data/demo_flux/measurements.csv").write_text(
             "energy_GeV,counts\n10,21\n20,41\n30,61\n"
         )
-        (self.assets / "references/demo_flux/method.md").write_text(
+        (self.assets / "knowledge/demo_flux/method.md").write_text(
             "Fit a straight line."
         )
         self.mcp_port = free_port()
@@ -349,14 +349,14 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             method = await call(
                 "read_file",
                 task_id=task_id,
-                path="assets/references/demo_flux/method.md",
+                path="assets/knowledge/demo_flux/method.md",
             )
             self.assertEqual(method["text"], "Fit a straight line.")
             denied = await session.call_tool(
                 "HEPAnalysis.write_file",
                 {
                     "task_id": task_id,
-                    "path": "assets/references/demo_flux/method.md",
+                    "path": "assets/knowledge/demo_flux/method.md",
                     "content": "changed",
                 },
             )
@@ -368,7 +368,7 @@ import os
 from pathlib import Path
 assets = Path(os.environ['ASSETS_DIR'])
 assert Path('inputs/TASK.md').is_file()
-method = assets / 'references/demo_flux/method.md'
+method = assets / 'knowledge/demo_flux/method.md'
 assert method.read_text() == 'Fit a straight line.'
 target = assets / 'data/demo_flux/measurements.csv'
 for operation in (

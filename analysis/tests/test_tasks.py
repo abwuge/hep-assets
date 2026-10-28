@@ -108,17 +108,17 @@ class TaskTests(unittest.TestCase):
 
     def test_shared_assets_are_read_only_and_confined(self):
         assets = self.root / "assets"
-        (assets / "references/demo_flux").mkdir(parents=True)
-        (assets / "references/demo_flux/method.md").write_text("public method")
+        (assets / "knowledge/demo_flux").mkdir(parents=True)
+        (assets / "knowledge/demo_flux/method.md").write_text("public method")
         manager = TaskManager(self.root / "tasks", assets=assets)
-        path = "assets/references/demo_flux/method.md"
+        path = "assets/knowledge/demo_flux/method.md"
         self.assertEqual(
             manager.read_file(self.task_id, path, 0, 100)["text"], "public method"
         )
         self.assertEqual(
             manager.files(self.task_id, "assets")["files"][0]["path"], path
         )
-        (assets / "method.md").symlink_to("references/demo_flux/method.md")
+        (assets / "method.md").symlink_to("knowledge/demo_flux/method.md")
         self.assertEqual(
             manager.read_file(self.task_id, "assets/method.md", 0, 100)["text"],
             "public method",
@@ -126,7 +126,7 @@ class TaskTests(unittest.TestCase):
         TaskManager(self.root / "tasks", assets=assets)
         with self.assertRaises(ValueError):
             manager.write_file(self.task_id, path, "changed")
-        for path in ("assets/../secret", "assets/references/../../../secret"):
+        for path in ("assets/../secret", "assets/knowledge/../../../secret"):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 manager.read_file(self.task_id, path, 0, 100)
         (assets / "escape").symlink_to(self.root)
