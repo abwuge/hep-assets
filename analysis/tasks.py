@@ -20,15 +20,30 @@ AREAS = {"inputs", "work", "outputs"}
 
 
 class TaskManager:
-    def __init__(self, storage: Path, runtime: Path, threads: int = 2):
+    def __init__(
+        self,
+        storage: Path,
+        threads: int = 2,
+        assets: Path | None = None,
+    ):
         self.storage = storage.resolve()
         self.storage.mkdir(parents=True, exist_ok=True)
-        self.runtime = runtime.resolve(strict=True)
-        if not (self.runtime / "bin").is_dir():
-            raise ValueError("Runtime must contain bin/")
         if threads < 1:
             raise ValueError("threads must be positive")
         self.threads = threads
+        self.assets = assets.resolve(strict=True) if assets is not None else None
+        if self.assets is not None:
+            if not self.assets.is_dir():
+                raise ValueError("Assets must be a directory")
+            if self.assets.is_relative_to(self.storage) or self.storage.is_relative_to(
+                self.assets
+            ):
+                raise ValueError("Assets and task storage must be separate directories")
+            if any(
+                path.is_symlink() and not path.resolve().is_relative_to(self.assets)
+                for path in self.assets.rglob("*")
+            ):
+                raise ValueError("Asset symlinks must stay inside the assets directory")
 
     def task(self, task_id: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{32}", task_id):
@@ -69,6 +84,13 @@ class TaskManager:
         return path
 
     def file(self, task: Path, name: str, *, write: bool = False) -> Path:
+        parts = Path(name).parts
+        if parts and parts[0] == "assets":
+            if write or self.assets is None:
+                raise ValueError("Assets are read-only and must be configured")
+            if len(parts) == 1:
+                return self.assets
+            return self.inside(self.assets, str(Path(*parts[1:])))
         workspace = task / "workspace"
         path = self.inside(workspace, name)
         area = path.relative_to(workspace).parts[0]
@@ -173,7 +195,7 @@ class TaskManager:
                     for path in (task / "uploads").rglob("*.part")
                     if path.is_file()
                 ],
-                "runtime": str(self.runtime),
+                "assets": str(self.assets) if self.assets is not None else None,
             }
 
     def files(
@@ -181,8 +203,9 @@ class TaskManager:
     ) -> dict:
         task = self.task(task_id)
         workspace = task / "workspace"
+        names = sorted(AREAS | ({"assets"} if self.assets is not None else set()))
         roots = (
-            [workspace / name for name in sorted(AREAS)]
+            [self.file(task, name) for name in names]
             if path == "."
             else [self.file(task, path)]
         )
@@ -191,7 +214,11 @@ class TaskManager:
             if not root.exists():
                 raise ValueError(f"Path does not exist: {path}")
             for item in [root] if root.is_file() else root.rglob("*"):
-                relative = str(item.relative_to(workspace))
+                relative = (
+                    str(Path("assets") / item.relative_to(self.assets))
+                    if self.assets is not None and item.is_relative_to(self.assets)
+                    else str(item.relative_to(workspace))
+                )
                 if item.is_file() and not item.is_symlink():
                     self.file(task, relative)
                     files.append(self.describe(item, relative))
@@ -279,7 +306,11 @@ class TaskManager:
                 raise ValueError("Finish pending input uploads before execution")
             self.working(task)
             result = execution.submit(
-                task, self.runtime, command, self.threads, timeout_seconds
+                task,
+                command,
+                self.threads,
+                timeout_seconds,
+                self.assets,
             )
             self.event(task, "execute", command_id=result["command_id"])
             return result

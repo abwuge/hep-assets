@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,7 +23,7 @@ class TaskTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.manager = TaskManager(self.root / "tasks", Path(sys.base_prefix))
+        self.manager = TaskManager(self.root / "tasks")
         self.task_id = self.manager.create("Analyze my data", "Analysis")["task_id"]
 
     def test_server_paths_are_not_input_sources(self):
@@ -51,7 +50,7 @@ class TaskTests(unittest.TestCase):
             self.manager.upload_input(self.task_id, "data.bin", "", offset=1)
         with self.assertRaises(ValueError):
             self.manager.execute(self.task_id, "true")
-        restored = TaskManager(self.manager.storage, Path(sys.base_prefix))
+        restored = TaskManager(self.manager.storage)
         self.assertEqual(
             restored.info(self.task_id)["uploads"][0]["next_offset"], 40000
         )
@@ -78,6 +77,35 @@ class TaskTests(unittest.TestCase):
         other = self.manager.create("Other task")["task_id"]
         with self.assertRaises(ValueError):
             self.manager.file(task, f"../../{other}/workspace/inputs/data.csv")
+
+    def test_shared_assets_are_read_only_and_confined(self):
+        assets = self.root / "assets"
+        (assets / "references/demo_flux").mkdir(parents=True)
+        (assets / "references/demo_flux/method.md").write_text("public method")
+        manager = TaskManager(self.root / "tasks", assets=assets)
+        path = "assets/references/demo_flux/method.md"
+        self.assertEqual(
+            manager.read_file(self.task_id, path, 0, 100)["text"], "public method"
+        )
+        self.assertEqual(
+            manager.files(self.task_id, "assets")["files"][0]["path"], path
+        )
+        (assets / "method.md").symlink_to("references/demo_flux/method.md")
+        self.assertEqual(
+            manager.read_file(self.task_id, "assets/method.md", 0, 100)["text"],
+            "public method",
+        )
+        TaskManager(self.root / "tasks", assets=assets)
+        with self.assertRaises(ValueError):
+            manager.write_file(self.task_id, path, "changed")
+        for path in ("assets/../secret", "assets/references/../../../secret"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                manager.read_file(self.task_id, path, 0, 100)
+        (assets / "escape").symlink_to(self.root)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            TaskManager(self.root / "tasks", assets=assets)
+        with self.assertRaisesRegex(ValueError, "separate"):
+            TaskManager(self.root / "tasks", assets=self.root)
 
     def test_completion_and_continuation(self):
         with self.assertRaises(ValueError):

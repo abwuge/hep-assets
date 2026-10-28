@@ -57,6 +57,7 @@ def create_server(
             "workflow": [
                 "Create a task from the user's request. Clarify missing assumptions.",
                 "Receive the user's files using the client's file-access tools.",
+                "List assets/ for shared data and references; read them in place.",
                 "Inspect schemas, ROOT keys/branches, units and data quality.",
                 "Write code under work/. Execute, poll, inspect errors and repair.",
                 "Verify numbers and figures. Save results/report under outputs/.",
@@ -64,8 +65,14 @@ def create_server(
             ],
             "paths": (
                 "inputs/ is read-only; work/ and outputs/ are writable. "
-                "Commands start at the task's workspace root."
+                "Commands start at the task's workspace root. "
+                "Shared assets are read-only; use $ASSETS_DIR in commands."
             ),
+            "assets": {
+                "available": manager.assets is not None,
+                "path": "assets/" if manager.assets is not None else None,
+                "command_environment": "ASSETS_DIR",
+            },
             "data_transfer": {
                 "preferred": "http",
                 "http_available": bool(transfers.base_urls),
@@ -171,7 +178,7 @@ def create_server(
     @server.tool()
     @guarded
     def read_file(task_id: str, path: str, offset: int = 0, limit: int = 16000) -> dict:
-        """Read UTF-8 input, code or reports; offsets count characters, not bytes."""
+        """Read UTF-8 inputs, assets, code or reports; offsets count characters."""
         return manager.read_file(task_id, path, offset, limit)
 
     @server.tool()
@@ -186,8 +193,9 @@ def create_server(
         """Start analysis and return command_id immediately; poll until terminal status.
 
         One active command per task. Uses bash -c, with work/ and outputs/ writable,
-        inputs/ read-only, no network and no inherited credentials. Set shell error
-        handling explicitly. Timeout 0 means no time limit.
+        inputs/ and shared server files are read-only. No network or inherited
+        credentials. Commands use the system PATH.
+        Set shell error handling explicitly. Timeout 0 means no time limit.
         """
         return manager.execute(task_id, command, timeout_seconds)
 
@@ -261,7 +269,9 @@ def main() -> None:
     parser.add_argument(
         "--storage", type=Path, default=Path(__file__).parent / ".local"
     )
-    parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument(
+        "--assets", type=Path, default=Path(__file__).resolve().parents[1] / "assets"
+    )
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
@@ -270,9 +280,9 @@ def main() -> None:
         "--public-url", help="Client-reachable HTTP(S) file-transfer base URL"
     )
     args = parser.parse_args()
-    manager = TaskManager(args.storage, args.runtime, args.threads)
     try:
-        execution.check_sandbox(manager.runtime)
+        manager = TaskManager(args.storage, args.threads, args.assets)
+        execution.check_sandbox(manager.assets)
         server = create_server(manager, args.port, args.public_url, args.host)
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         parser.error(str(error))

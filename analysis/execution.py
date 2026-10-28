@@ -49,7 +49,11 @@ def command_status(directory: Path) -> dict:
 
 
 def submit(
-    task: Path, runtime: Path, command: str, threads: int, timeout_seconds: int
+    task: Path,
+    command: str,
+    threads: int,
+    timeout_seconds: int,
+    assets: Path | None = None,
 ) -> dict:
     command_id = uuid.uuid4().hex
     directory = task / "commands" / command_id
@@ -58,10 +62,10 @@ def submit(
         directory / "command.json",
         {
             "command": command,
-            "runtime": str(runtime),
             "workspace": str(task / "workspace"),
             "threads": threads,
             "timeout_seconds": timeout_seconds,
+            "assets": str(assets) if assets is not None else None,
         },
     )
     state = {
@@ -128,7 +132,10 @@ def cancel(directory: Path) -> dict:
 
 
 def sandbox_command(
-    directory: Path, workspace: Path, runtime: Path, command: str
+    directory: Path,
+    workspace: Path,
+    command: str,
+    assets: Path | None = None,
 ) -> list[str]:
     """Apply the same filesystem and network policy with native OS isolation."""
     writable = [workspace / name for name in ("work", "outputs", ".home", ".tmp")]
@@ -162,8 +169,9 @@ def sandbox_command(
             ):
                 if Path(name).exists():
                     arguments.extend(["--ro-bind", name, name])
-            for path in (runtime, workspace):
-                arguments.extend(["--ro-bind", str(path), str(path)])
+            for path in (workspace, assets):
+                if path is not None:
+                    arguments.extend(["--ro-bind", str(path), str(path)])
             for path in writable:
                 arguments.extend(["--bind", str(path), str(path)])
             arguments.extend(
@@ -185,7 +193,6 @@ def sandbox_command(
             quote = json.dumps
             readable = [
                 workspace,
-                runtime,
                 Path("/System"),
                 Path("/usr"),
                 Path("/bin"),
@@ -197,6 +204,8 @@ def sandbox_command(
                 Path("/private/var/db"),
                 Path("/private/var/run"),
             ]
+            if assets is not None:
+                readable.append(assets)
             profile = directory / "sandbox.sb"
             profile.write_text(
                 "(version 1)\n(allow default)\n(deny network*)\n(deny signal)\n"
@@ -225,7 +234,7 @@ def sandbox_command(
             raise ValueError("Analysis isolation supports Linux and macOS")
 
 
-def check_sandbox(runtime: Path) -> None:
+def check_sandbox(assets: Path | None = None) -> None:
     """Fail startup if the host cannot create the required sandbox."""
     with tempfile.TemporaryDirectory(prefix="hep-sandbox-") as name:
         directory = Path(name).resolve()
@@ -233,7 +242,7 @@ def check_sandbox(runtime: Path) -> None:
         for area in ("inputs", "work", "outputs", ".home", ".tmp"):
             (workspace / area).mkdir(parents=True)
         result = subprocess.run(
-            sandbox_command(directory, workspace, runtime, "true"),
+            sandbox_command(directory, workspace, "true", assets),
             cwd=workspace,
             env={"PATH": os.defpath},
             stdin=subprocess.DEVNULL,
@@ -248,9 +257,9 @@ def check_sandbox(runtime: Path) -> None:
 def run_worker(directory: Path) -> None:
     specification = read_json(directory / "command.json")
     workspace = Path(specification["workspace"])
-    runtime = Path(specification["runtime"])
+    assets = Path(specification["assets"]) if specification.get("assets") else None
     environment = {
-        "PATH": f"{runtime}/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        "PATH": os.defpath,
         "HOME": str(workspace / ".home"),
         "TMPDIR": str(workspace / ".tmp"),
         "LANG": "C.UTF-8" if sys.platform == "linux" else "en_US.UTF-8",
@@ -267,6 +276,8 @@ def run_worker(directory: Path) -> None:
             str(specification["threads"]),
         ),
     }
+    if assets is not None:
+        environment["ASSETS_DIR"] = str(assets)
     state = read_json(directory / "status.json")
     interrupted = False
 
@@ -280,9 +291,7 @@ def run_worker(directory: Path) -> None:
     try:
         with (directory / "output.txt").open("wb") as output:
             process = subprocess.Popen(
-                sandbox_command(
-                    directory, workspace, runtime, specification["command"]
-                ),
+                sandbox_command(directory, workspace, specification["command"], assets),
                 cwd=workspace,
                 env=environment,
                 stdout=output,

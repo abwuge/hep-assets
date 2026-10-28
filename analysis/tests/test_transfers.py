@@ -3,7 +3,6 @@
 import base64
 import json
 import socket
-import sys
 import tempfile
 import time
 import unittest
@@ -105,7 +104,7 @@ class TransferTests(unittest.IsolatedAsyncioTestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.storage = Path(temporary.name)
-        self.manager = TaskManager(self.storage, Path(sys.base_prefix))
+        self.manager = TaskManager(self.storage)
         self.task_id = self.manager.create("Analyze my uploaded file")["task_id"]
         self.server = create_server(self.manager)
 
@@ -132,7 +131,7 @@ class TransferTests(unittest.IsolatedAsyncioTestCase):
             offset = result["next_offset"]
             if not result["complete"]:
                 self.assertFalse(self.manager.files(self.task_id, "inputs")["files"])
-                self.manager = TaskManager(self.storage, Path(sys.base_prefix))
+                self.manager = TaskManager(self.storage)
                 self.server = create_server(self.manager)
         output = self.manager.file(self.manager.task(self.task_id), "outputs/data.bin")
         output.write_bytes(data)
@@ -317,7 +316,7 @@ class TransferTests(unittest.IsolatedAsyncioTestCase):
                 path="outputs/data.bin",
             )
             self.assertEqual(download["method"], "GET")
-        self.manager = TaskManager(self.storage, Path(sys.base_prefix))
+        self.manager = TaskManager(self.storage)
         async with self.http_client() as client:
             for _ in range(2):
                 response = await client.get(download["url"])

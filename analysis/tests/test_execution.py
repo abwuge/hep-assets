@@ -18,13 +18,16 @@ from analysis.tasks import TaskManager
 class SandboxTests(unittest.TestCase):
     def test_linux_mounts_and_namespace_policy(self):
         workspace = Path("/srv/tasks/one/workspace")
-        runtime = Path("/opt/science")
+        assets = Path("/srv/assets")
         with (
             patch.object(sys, "platform", "linux"),
             patch("analysis.execution.shutil.which", return_value="/usr/bin/bwrap"),
         ):
             args = execution.sandbox_command(
-                Path("/srv/tasks/one/commands/id"), workspace, runtime, "echo 'a b'"
+                Path("/srv/tasks/one/commands/id"),
+                workspace,
+                "echo 'a b'",
+                assets,
             )
         self.assertEqual(args[0], "/usr/bin/bwrap")
         for flag in ("--unshare-all", "--die-with-parent", "--new-session"):
@@ -34,8 +37,8 @@ class SandboxTests(unittest.TestCase):
             for index, value in enumerate(args)
             if value == "--ro-bind"
         ]
-        self.assertIn([str(runtime), str(runtime)], mounts)
         self.assertIn([str(workspace), str(workspace)], mounts)
+        self.assertIn([str(assets), str(assets)], mounts)
         self.assertNotIn(["/", "/"], mounts)
         self.assertNotIn(["/etc", "/etc"], mounts)
         writable = [
@@ -70,12 +73,12 @@ class SandboxTests(unittest.TestCase):
             patch("analysis.execution.shutil.which", return_value=None),
             self.assertRaisesRegex(ValueError, "Install bubblewrap"),
         ):
-            execution.check_sandbox(Path(sys.base_prefix))
+            execution.check_sandbox()
         with (
             patch.object(sys, "platform", "freebsd"),
             self.assertRaisesRegex(ValueError, "supports Linux and macOS"),
         ):
-            execution.check_sandbox(Path(sys.base_prefix))
+            execution.check_sandbox()
 
     def test_startup_surfaces_kernel_denial(self):
         with (
@@ -90,7 +93,7 @@ class SandboxTests(unittest.TestCase):
                 "bwrap: Creating new namespace failed: Operation not permitted",
             )
             with self.assertRaisesRegex(ValueError, "Operation not permitted"):
-                execution.check_sandbox(Path(sys.base_prefix))
+                execution.check_sandbox()
             self.assertEqual(run.call_count, 1)
 
 
@@ -100,7 +103,7 @@ class ExecutionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.manager = TaskManager(self.root / "tasks", Path(sys.base_prefix))
+        self.manager = TaskManager(self.root / "tasks")
         self.task_id = self.manager.create("Analyze supplied values")["task_id"]
         self.addCleanup(self.manager.cancel_task, self.task_id)
 
@@ -152,16 +155,44 @@ print('verified')
 """
         self.manager.write_file(self.task_id, "work/check.py", code)
         with patch.dict(os.environ, {"HEP_TEST_SECRET": "not inherited"}):
-            command = self.manager.execute(self.task_id, "python work/check.py")
+            command = self.manager.execute(
+                self.task_id, "/usr/bin/python3 work/check.py"
+            )
         result = self.wait(command["command_id"])
         self.assertEqual(result["status"], "succeeded", result)
         self.assertIn("verified", result["output"])
+
+    def test_shell_needs_no_scientific_environment(self):
+        command = self.manager.execute(self.task_id, "printf ordinary-command")
+        result = self.wait(command["command_id"])
+        self.assertEqual(result["status"], "succeeded", result)
+        self.assertEqual(result["output"], "ordinary-command")
+        record = execution.read_json(
+            self.manager.command(self.task_id, command["command_id"]) / "command.json"
+        )
+        self.assertNotIn("runtime", record)
+
+    def test_executable_asset_is_read_only(self):
+        software = self.root / "software"
+        (software / "demo").mkdir(parents=True)
+        (software / "demo/run.sh").write_text("printf demo-program")
+        self.manager = TaskManager(self.root / "tasks", assets=software)
+        command = self.manager.execute(self.task_id, 'sh "$ASSETS_DIR/demo/run.sh"')
+        result = self.wait(command["command_id"])
+        self.assertEqual(result["status"], "succeeded", result)
+        self.assertEqual(result["output"], "demo-program")
+        command = self.manager.execute(
+            self.task_id, 'printf bad > "$ASSETS_DIR/demo/run.sh"'
+        )
+        result = self.wait(command["command_id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual((software / "demo/run.sh").read_text(), "printf demo-program")
 
     def test_restore_running_command_and_busy_guard(self):
         command = self.manager.execute(self.task_id, "sleep 2; printf recovered")
         with self.assertRaises(ValueError):
             self.manager.execute(self.task_id, "true")
-        restored = TaskManager(self.manager.storage, Path(sys.base_prefix))
+        restored = TaskManager(self.manager.storage)
         self.assertEqual(restored.info(self.task_id)["status"], "running")
         self.manager = restored
         result = self.wait(command["command_id"])
@@ -205,7 +236,7 @@ print('verified')
             listener.listen()
             port = listener.getsockname()[1]
             probe = [
-                str(Path(sys.base_prefix) / "bin/python3"),
+                "/usr/bin/python3",
                 "-c",
                 f"import socket; socket.create_connection(('127.0.0.1', {port}), 1)",
             ]

@@ -91,6 +91,15 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.port, hub_port = free_port(), free_port()
         self.hub = f"http://127.0.0.1:{hub_port}"
         self.env = {**os.environ, "STORAGE_FILE_PATH": str(self.root / "servers.json")}
+        self.assets = self.root / "assets"
+        (self.assets / "data/demo_flux").mkdir(parents=True)
+        (self.assets / "references/demo_flux").mkdir(parents=True)
+        (self.assets / "data/demo_flux/measurements.csv").write_text(
+            "energy_GeV,counts\n10,21\n20,41\n30,61\n"
+        )
+        (self.assets / "references/demo_flux/method.md").write_text(
+            "Fit a straight line."
+        )
         self.mcp_port = free_port()
         self.mcp = f"http://127.0.0.1:{self.mcp_port}/mcp"
         self.start_service(
@@ -111,8 +120,8 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             "analysis.server",
             "--storage",
             str(self.root / "tasks"),
-            "--runtime",
-            sys.base_prefix,
+            "--assets",
+            str(self.assets),
             "--port",
             str(self.port),
             "--hub",
@@ -189,7 +198,9 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
                 content=ANALYSIS_CODE,
             )
             command = await call(
-                "execute", task_id=task_id, command="sleep 3; python work/analyze.py"
+                "execute",
+                task_id=task_id,
+                command="sleep 3; /usr/bin/python3 work/analyze.py",
             )
             self.process.terminate()
             self.process.wait(timeout=5)
@@ -305,6 +316,103 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             response = await http.get(upload["url"])
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.headers["content-type"], "application/json")
+
+    async def test_uploaded_task_uses_server_assets_read_only(self):
+        async with (
+            streamablehttp_client(self.mcp) as (read, write, _),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+
+            async def call(name, **arguments):
+                result = await session.call_tool("HEPAnalysis." + name, arguments)
+                block = result.content[0]
+                assert isinstance(block, TextContent)
+                value = json.loads(block.text)
+                self.assertTrue(value["ok"], value)
+                return value
+
+            info = await call("analysis_info")
+            self.assertTrue(info["assets"]["available"])
+            task_id = (await call("create_task", request="Solve the uploaded task"))[
+                "task_id"
+            ]
+            await call(
+                "upload_input",
+                task_id=task_id,
+                input_name="TASK.md",
+                data_base64=base64.b64encode(b"Fit the shared measurements.").decode(),
+            )
+            files = await call("list_files", task_id=task_id, path="assets")
+            self.assertEqual(len(files["files"]), 2)
+            method = await call(
+                "read_file",
+                task_id=task_id,
+                path="assets/references/demo_flux/method.md",
+            )
+            self.assertEqual(method["text"], "Fit a straight line.")
+            denied = await session.call_tool(
+                "HEPAnalysis.write_file",
+                {
+                    "task_id": task_id,
+                    "path": "assets/references/demo_flux/method.md",
+                    "content": "changed",
+                },
+            )
+            block = denied.content[0]
+            assert isinstance(block, TextContent)
+            self.assertFalse(json.loads(block.text)["ok"])
+            code = """
+import os
+from pathlib import Path
+assets = Path(os.environ['ASSETS_DIR'])
+assert Path('inputs/TASK.md').is_file()
+method = assets / 'references/demo_flux/method.md'
+assert method.read_text() == 'Fit a straight line.'
+target = assets / 'data/demo_flux/measurements.csv'
+for operation in (
+    lambda: target.write_text('bad'),
+    lambda: target.unlink(),
+    lambda: target.rename(assets / 'moved.csv'),
+    lambda: (assets / 'new.txt').write_text('bad'),
+    lambda: os.symlink('data', assets / 'link'),
+):
+    try: operation()
+    except OSError: pass
+    else: raise AssertionError('assets writable')
+try:
+    os.link(target, 'work/asset-hardlink')
+except OSError: pass
+else:
+    try: Path('work/asset-hardlink').write_text('bad')
+    except OSError: pass
+    else: raise AssertionError('asset writable through hard link')
+""" + ANALYSIS_CODE.replace(
+                "Path('inputs/measurements.csv')",
+                "(assets / 'data/demo_flux/measurements.csv')",
+            )
+            await call(
+                "write_file", task_id=task_id, path="work/solve.py", content=code
+            )
+            command = await call(
+                "execute", task_id=task_id, command="/usr/bin/python3 work/solve.py"
+            )
+            for _ in range(20):
+                state = await call(
+                    "poll_command",
+                    task_id=task_id,
+                    command_id=command["command_id"],
+                    wait_seconds=1,
+                )
+                if state["status"] in {"succeeded", "failed", "cancelled"}:
+                    break
+            self.assertEqual(state["status"], "succeeded", state)
+            result = await call("read_file", task_id=task_id, path="outputs/fit.json")
+            self.assertEqual(json.loads(result["text"])["slope"], 2)
+            self.assertEqual(
+                (self.assets / "data/demo_flux/measurements.csv").read_text(),
+                "energy_GeV,counts\n10,21\n20,41\n30,61\n",
+            )
 
 
 if __name__ == "__main__":
