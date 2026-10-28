@@ -1,4 +1,4 @@
-"""Provide analysis workspaces through the official SCP Hub."""
+"""Provide analysis workspaces through the selected SCP Hub."""
 
 import argparse
 import binascii

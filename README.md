@@ -13,20 +13,24 @@ git lfs pull
 
 ## 启动
 
-在两个终端分别运行：
+准备好 Hub 后，启动分析服务：
 
 ```sh
-uv run --locked --group hub hub/run.py
+uv run python -m analysis
 ```
 
+默认注册本机 Hub；使用其他 Hub 时添加 `--hub <Hub地址>`。
+
+如需使用仓库自带的 Hub，在另一个终端先运行：
+
 ```sh
-uv run --locked --group analysis python -m analysis.server
+uv run python -m hub
 ```
 
 ## 使用
 
-在智能体客户端添加 MCP 地址 `http://127.0.0.1:46381/mcp`，上传任务说明和验收要求，提出分析需求。
+客户端连接所用 Hub 的 MCP 地址，上传任务说明和验收要求，提出分析需求。自带 Hub 的地址为 `http://127.0.0.1:46381/mcp`。
 
 智能体可读取 `assets/` 中的数据和参考资料，在独立工作区执行分析并返回结果。
 
-[分析服务配置](analysis/README.md) · [资产目录](assets/README.md) · [Hub 配置](hub/README.md)
+[分析服务配置](analysis/README.md) · [资产目录](assets/README.md) · [可选 Hub](hub/README.md)

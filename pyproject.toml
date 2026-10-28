@@ -23,6 +23,7 @@ scp = [
 [tool.uv]
 required-version = ">=0.13.5"
 package = false
+default-groups = ["analysis"]
 
 [[tool.uv.index]]
 name = "pypi"

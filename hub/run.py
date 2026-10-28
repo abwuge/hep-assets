@@ -14,7 +14,10 @@ import uvicorn
 
 
 async def serve(host: str, port: int, hub_port: int, storage: Path) -> None:
-    from mcp_bridge import create_app
+    if __package__:
+        from .mcp_bridge import create_app
+    else:
+        from mcp_bridge import create_app
 
     storage.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "STORAGE_FILE_PATH": str(storage / "servers.json")}

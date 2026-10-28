@@ -3,12 +3,15 @@
 import asyncio
 import base64
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from scp.types import ImageContent, TextContent
 
+from analysis import server
 from analysis.server import create_server
 from analysis.tasks import TaskManager
 
@@ -16,6 +19,31 @@ PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8A"
     "AwMCAO+aD1sAAAAASUVORK5CYII="
 )
+
+
+class StartupTests(unittest.TestCase):
+    def test_default_registers_with_local_hub(self):
+        with (
+            patch.object(sys, "argv", ["analysis"]),
+            patch.object(server, "TaskManager"),
+            patch.object(server.execution, "check_sandbox"),
+            patch.object(server, "create_server", return_value=Mock()) as create,
+            patch.object(server.threading, "Thread") as thread,
+            patch.object(server.socket, "create_connection"),
+            patch.object(server.httpx, "Client") as http,
+        ):
+
+            def run(**kwargs):
+                thread.call_args.kwargs["target"]()
+
+            create.return_value.run.side_effect = run
+            server.main()
+            thread.return_value.start.assert_called_once()
+            client = http.return_value.__enter__.return_value
+            self.assertEqual(
+                client.post.call_args.args[0],
+                "http://127.0.0.1:46380/register_server",
+            )
 
 
 class TaskTests(unittest.TestCase):

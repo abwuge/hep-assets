@@ -281,6 +281,7 @@ wheels = [
 name = "hep-assets"
 version = "0.1.0"
 source = { virtual = "." }
+default-groups = ["analysis"]
 
 [package.dev-dependencies]
 analysis = [

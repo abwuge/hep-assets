@@ -104,7 +104,8 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.mcp = f"http://127.0.0.1:{self.mcp_port}/mcp"
         self.start_service(
             [
-                str(PROJECT / "hub/run.py"),
+                "-m",
+                "hub",
                 "--hub-port",
                 str(hub_port),
                 "--port",
@@ -117,7 +118,7 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         )
         self.server_args = [
             "-m",
-            "analysis.server",
+            "analysis",
             "--storage",
             str(self.root / "tasks"),
             "--assets",

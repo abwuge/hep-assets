@@ -1,13 +1,13 @@
 # SCP Hub
 
-启动官方 SCP Hub，并通过 Streamable HTTP 向客户端提供工具发现和调用。
+仓库自带的官方 SCP Hub，通过 Streamable HTTP 向客户端提供工具发现和调用。已有 Hub 时可直接使用，无需启动本组件。
 
 ## 启动与连接
 
 在项目根目录运行：
 
 ```sh
-uv run --locked --group hub hub/run.py
+uv run python -m hub
 ```
 
 - 客户端 MCP URL：`http://127.0.0.1:46381/mcp`。
@@ -28,7 +28,15 @@ uv run --locked --group hub hub/run.py
 
 ## 注册下游服务
 
-分析服务会自动注册。其他 SSE 服务启动后，可调用注册接口：
+分析服务默认注册到本机 Hub：
+
+```sh
+uv run python -m analysis
+```
+
+注册到其他 Hub 时使用 `--hub <Hub地址>`。
+
+其他 SSE 服务启动后，可调用注册接口：
 
 ```sh
 curl --fail http://127.0.0.1:46380/register_server \

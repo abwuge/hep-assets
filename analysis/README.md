@@ -6,13 +6,13 @@
 
 Linux 需安装 Bubblewrap 并允许用户命名空间；macOS 使用系统自带的 `sandbox-exec`。
 
-启动 [Hub](../hub/README.md) 后，在项目根目录运行：
+准备好 Hub 后，在项目根目录运行：
 
 ```sh
-uv run --locked --group analysis python -m analysis.server
+uv run python -m analysis
 ```
 
-客户端连接 Hub 的 MCP 地址 `http://127.0.0.1:46381/mcp`，上传任务说明和文件，即可开始分析。
+服务默认注册本机 Hub。使用其他 Hub 时添加 `--hub <Hub地址>`；客户端连接该 Hub 的 MCP 入口。
 
 ## 配置
 
@@ -20,7 +20,7 @@ uv run --locked --group analysis python -m analysis.server
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | 监听地址 |
 | `--port` | `8001` | 服务端口 |
-| `--hub` | `http://127.0.0.1:46380` | Hub 地址 |
+| `--hub` | `http://127.0.0.1:46380` | 注册目标 Hub |
 | `--storage` | `analysis/.local/` | 任务存储目录 |
 | `--assets` | 项目根目录的 `assets/` | 只读共享资产目录 |
 | `--threads` | `2` | 数值库线程数 |
