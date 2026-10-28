@@ -50,29 +50,29 @@ def create_server(
     transfers = Transfers(manager, http_base_urls(host, port, public_url))
     transfers.attach(server)
 
-    @server.tool()
-    @guarded
-    def analysis_info() -> dict:
-        """Start here for the user-data-to-analysis workflow and transfer methods."""
+    def workspace_context() -> dict:
         return {
-            "workflow": [
-                "Create a task from the user's request. Clarify missing assumptions.",
-                "Receive the user's files using the client's file-access tools.",
-                "List assets/ for shared data and references; read them in place.",
-                "Inspect schemas, ROOT keys/branches, units and data quality.",
-                "Write code under work/. Execute, poll, inspect errors and repair.",
-                "Verify numbers and figures. Save results/report under outputs/.",
-                "Complete the task; return findings, previews and result files.",
-            ],
             "paths": (
+                "Client-local files and this server workspace are separate. "
+                "Actual resource paths may differ from paths in task documents. "
+                "Discover the available resources through the server tools. "
+                "Reading a local file or passing its path does not upload it. "
+                "Transfer user-provided task files and data into inputs/. "
                 "inputs/ is read-only; work/ and outputs/ are writable. "
-                "Commands start at the task's workspace root. "
+                "execute runs on the server at the task's workspace root. "
                 "Shared assets are read-only; use $ASSETS_DIR in commands."
             ),
             "assets": {
                 "available": manager.assets is not None,
                 "path": "assets/" if manager.assets is not None else None,
                 "command_environment": "ASSETS_DIR",
+                "next_action": (
+                    "Call list_files with path='assets/' to discover shared data, "
+                    "references and tools. Follow pagination and read relevant "
+                    "documentation before reporting that inputs are missing."
+                    if manager.assets is not None
+                    else "No shared assets are configured for this server."
+                ),
             },
             "data_transfer": {
                 "preferred": "http",
@@ -109,6 +109,23 @@ def create_server(
                 ),
                 "max_chunk_bytes": CHUNK_BYTES,
             },
+        }
+
+    @server.tool()
+    @guarded
+    def analysis_info() -> dict:
+        """Discover server assets, file upload/download and analysis execution."""
+        return {
+            **workspace_context(),
+            "workflow": [
+                "Create a task from the user's request. Clarify missing assumptions.",
+                "Receive the user's files using the client's file-access tools.",
+                "List assets/ for shared data and references; read them in place.",
+                "Inspect schemas, ROOT keys/branches, units and data quality.",
+                "Write code under work/. Execute, poll, inspect errors and repair.",
+                "Verify numbers and figures. Save results/report under outputs/.",
+                "Complete the task; return findings, previews and result files.",
+            ],
             "execution": (
                 "Commands survive MCP/server restarts. Poll using task_id and "
                 "command_id; cancel_task stops work without deleting files."
@@ -126,8 +143,21 @@ def create_server(
     @server.tool()
     @guarded
     def create_task(request: str, title: str = "") -> dict:
-        """Create an analysis from the user's request; then provide input files."""
-        return manager.create(request, title)
+        """Create a server analysis workspace and discover shared assets.
+
+        Then upload client-local files using create_upload and HTTP PUT.
+        Creating the task does not transfer files. The result includes asset
+        discovery and file-transfer instructions.
+        """
+        return {
+            **manager.create(request, title),
+            **workspace_context(),
+            "next_action": (
+                "Upload the user's task files and data: call create_upload for "
+                "each file, then use client-local file tools for HTTP PUT. "
+                "Discover shared inputs using the assets instructions below."
+            ),
+        }
 
     @server.tool()
     @guarded
@@ -139,7 +169,7 @@ def create_server(
     @guarded
     def get_task(task_id: str) -> dict:
         """Read the request, input inventory, recent commands and delivered results."""
-        return manager.info(task_id)
+        return {**manager.info(task_id), "workspace_context": workspace_context()}
 
     @server.tool()
     @guarded
@@ -150,8 +180,10 @@ def create_server(
         offset: int = 0,
         final: bool = True,
     ) -> dict:
-        """Upload client-readable bytes, at most 256 KiB decoded per call.
+        """MCP fallback for file upload; prefer create_upload and client HTTP PUT.
 
+        Use only when HTTP is unavailable or unreachable, and report the warning.
+        Upload at most 256 KiB decoded per call.
         Reuse next_offset; set final only on the last chunk. Pending uploads are
         excluded from inputs until finalized. Never claim an attachment was
         received before the transfer succeeds.
@@ -173,13 +205,21 @@ def create_server(
     def list_files(
         task_id: str, path: str = ".", offset: int = 0, limit: int = 100
     ) -> dict:
-        """List files with sizes and MIME types; follow pagination."""
+        """Discover server workspace or shared-asset files; follow pagination.
+
+        Use path='assets/' for shared data, references and tools. Client-local
+        files appear under inputs/ only after upload. Paths are server-relative.
+        """
         return manager.files(task_id, path, offset, limit)
 
     @server.tool()
     @guarded
     def read_file(task_id: str, path: str, offset: int = 0, limit: int = 16000) -> dict:
-        """Read UTF-8 inputs, assets, code or reports; offsets count characters."""
+        """Read server UTF-8 inputs, shared assets, code or reports.
+
+        Use list_files to discover paths. If has_more is true, continue at
+        next_offset to read the complete file. Offsets count characters.
+        """
         return manager.read_file(task_id, path, offset, limit)
 
     @server.tool()
@@ -196,6 +236,8 @@ def create_server(
         One active command per task. Uses bash -c, with work/ and outputs/ writable,
         inputs/ and shared server files are read-only. No network or inherited
         credentials. Commands use the system PATH.
+        Use client-local tools for file HTTP transfers; this command has no
+        client-local file access or network. Use ASSETS_DIR for shared assets.
         Set shell error handling explicitly. Timeout 0 means no time limit.
         """
         return manager.execute(task_id, command, timeout_seconds)
@@ -228,7 +270,11 @@ def create_server(
     def download_file(
         task_id: str, path: str, offset: int = 0, limit: int = 65536
     ) -> dict:
-        """Return a binary file in base64 chunks; reconstruct bytes on the client."""
+        """MCP fallback for downloads; prefer result_link and client HTTP GET.
+
+        Use only when HTTP is unavailable or unreachable, and report the warning.
+        Reconstruct base64 chunks on the client, following next_offset.
+        """
         return manager.download(task_id, path, offset, limit)
 
     @server.tool()
@@ -260,7 +306,15 @@ def create_server(
         Summarize actual findings, assumptions and checks. This records the agent's
         completion; scientific claims must be supported by the produced evidence.
         """
-        return manager.finish(task_id, summary, artifacts)
+        return {
+            **manager.finish(task_id, summary, artifacts),
+            "next_action": (
+                "For each artifact to deliver, call result_link and use a "
+                "client-local HTTP client to GET and save the bytes. Confirm the "
+                "local save before reporting delivery. If HTTP is unavailable "
+                "or unreachable, warn and use download_file with next_offset."
+            ),
+        }
 
     return server
 

@@ -134,8 +134,15 @@ class Transfers:
             "name": name,
             "method": "PUT" if direction == "upload" else "GET",
             "next_action": (
-                "Transfer raw bytes directly over HTTP using client file tools. "
-                "Select a reachable target from urls. If none works, warn and use "
+                (
+                    "Use a client-local HTTP client to PUT the original file bytes "
+                    "to a reachable target from urls; confirm upload success. "
+                    if direction == "upload"
+                    else "Use a client-local HTTP client to GET bytes from a "
+                    "reachable target in urls and save the file locally. "
+                )
+                + "Do not use server execute for client file transfers. "
+                "If none of the HTTP targets works, warn and use "
                 + (
                     "upload_input with next_offset."
                     if direction == "upload"

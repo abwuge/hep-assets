@@ -54,6 +54,45 @@ class TaskTests(unittest.TestCase):
         self.manager = TaskManager(self.root / "tasks")
         self.task_id = self.manager.create("Analyze my data", "Analysis")["task_id"]
 
+    def test_create_task_advertises_assets_and_client_http_transfer(self):
+        assets = self.root / "assets"
+        assets.mkdir()
+        manager = TaskManager(self.root / "tasks", assets=assets)
+        service = create_server(manager)
+        blocks = asyncio.run(service.call_tool("create_task", {"request": "Analyze"}))
+        block = blocks[0]
+        assert isinstance(block, TextContent)
+        result = json.loads(block.text)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["assets"]["path"], "assets/")
+        self.assertIn("list_files", result["assets"]["next_action"])
+        self.assertIn("does not upload", result["paths"])
+        self.assertIn("paths may differ", result["paths"])
+        self.assertEqual(result["data_transfer"]["preferred"], "http")
+        self.assertIn("create_upload", result["next_action"])
+        self.assertIn("HTTP PUT", result["next_action"])
+        self.assertFalse(manager.files(result["task_id"], "inputs")["files"])
+        blocks = asyncio.run(
+            service.call_tool("get_task", {"task_id": result["task_id"]})
+        )
+        block = blocks[0]
+        assert isinstance(block, TextContent)
+        restored = json.loads(block.text)
+        self.assertEqual(restored["assets"], str(assets))
+        self.assertEqual(restored["workspace_context"]["assets"], result["assets"])
+        self.assertEqual(
+            restored["workspace_context"]["data_transfer"], result["data_transfer"]
+        )
+
+    def test_create_task_reports_no_shared_assets(self):
+        service = create_server(self.manager)
+        blocks = asyncio.run(service.call_tool("create_task", {"request": "Analyze"}))
+        block = blocks[0]
+        assert isinstance(block, TextContent)
+        result = json.loads(block.text)
+        self.assertFalse(result["assets"]["available"])
+        self.assertIsNone(result["assets"]["path"])
+
     def test_server_paths_are_not_input_sources(self):
         self.assertFalse(hasattr(self.manager, "import_input"))
         server = create_server(self.manager)
