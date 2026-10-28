@@ -7,3 +7,6 @@ __pycache__/
 # Tool caches and macOS metadata
 .ruff_cache/
 .DS_Store
+
+# Local test environments
+.local/

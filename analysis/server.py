@@ -17,7 +17,7 @@ import httpx
 from scp.server.fastmcp import FastMCP, Image
 
 from . import execution
-from .tasks import CHUNK_BYTES, TaskManager
+from .tasks import CHUNK_BYTES, TaskBusyError, TaskManager
 from .transfers import Transfers, http_base_urls
 
 
@@ -34,6 +34,7 @@ def guarded[**P, R](function: Callable[P, R]) -> Callable[P, R | dict]:
                 "ok": False,
                 "error": str(error),
                 "error_type": type(error).__name__,
+                **(error.details if isinstance(error, TaskBusyError) else {}),
             }
 
     return call

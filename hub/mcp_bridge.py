@@ -1,5 +1,6 @@
 """Expose the official Hub's tools as a server-side Streamable HTTP endpoint."""
 
+import json
 from contextlib import asynccontextmanager
 
 import anyio
@@ -40,6 +41,13 @@ def create_app(hub: str) -> Starlette:
     server = Server("SCP Hub")
     client = httpx.AsyncClient(base_url=hub, timeout=40, trust_env=False)
 
+    def tool_error(code: str, message: str, tool: str, **details: object) -> ValueError:
+        return ValueError(
+            json.dumps(
+                {"ok": False, "code": code, "error": message, "tool": tool, **details}
+            )
+        )
+
     @server.list_tools()
     async def list_tools():
         response = await client.get("/tools")
@@ -48,13 +56,62 @@ def create_app(hub: str) -> Starlette:
 
     @server.call_tool()
     async def call_tool(name, arguments):
-        response = await client.post(
-            "/tools/call_tool", json={**arguments, "name": name}
-        )
-        response.raise_for_status()
-        # NOTE: The official Hub returns only content, dropping downstream isError.
-        # The MCP SDK marks this call successful unless the bridge raises an error.
-        result = types.CallToolResult.model_validate({"content": response.json()})
+        try:
+            response = await client.post(
+                "/tools/call_tool", json={**arguments, "name": name}
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as error:
+            raise tool_error(
+                "hub_timeout",
+                "Timed out waiting for the Hub response",
+                name,
+                error_type=type(error).__name__,
+                next_action=(
+                    "Check task state before retrying a state-changing call; "
+                    "the downstream operation may still have completed."
+                ),
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise tool_error(
+                "hub_http_error",
+                f"Hub returned HTTP {error.response.status_code}",
+                name,
+                status_code=error.response.status_code,
+                next_action=(
+                    "Inspect Hub and downstream logs for the cause. "
+                    "Check task state before retrying a state-changing call."
+                ),
+            ) from error
+        except httpx.RequestError as error:
+            raise tool_error(
+                "hub_transport_error",
+                str(error) or type(error).__name__,
+                name,
+                error_type=type(error).__name__,
+                next_action="Check the Hub connection and task state.",
+            ) from error
+        try:
+            result = types.CallToolResult.model_validate({"content": response.json()})
+        except ValueError as error:
+            raise tool_error(
+                "hub_invalid_response",
+                "Hub returned an invalid tool response",
+                name,
+                next_action="Inspect Hub and downstream logs.",
+            ) from error
+        # The official Hub drops isError. HEPAnalysis preserves errors in its
+        # explicit JSON envelope; raising lets the MCP SDK restore isError.
+        if name.startswith("HEPAnalysis."):
+            for block in result.content:
+                if not isinstance(block, types.TextContent):
+                    continue
+                try:
+                    value = json.loads(block.text)
+                except ValueError:
+                    continue
+                if isinstance(value, dict) and value.get("ok") is False:
+                    raise ValueError(block.text)
         return result.content
 
     @asynccontextmanager

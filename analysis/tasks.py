@@ -19,6 +19,21 @@ CHUNK_BYTES = 256 * 1024
 AREAS = {"inputs", "work", "outputs"}
 
 
+class TaskBusyError(ValueError):
+    def __init__(self, task_id: str, command: dict):
+        super().__init__("A command is running; poll or cancel it first")
+        self.details = {
+            "code": "task_busy",
+            "task_id": task_id,
+            "command_id": command["command_id"],
+            "command_status": command["status"],
+            "next_action": (
+                "Call poll_command with this task_id and command_id until terminal "
+                "status, then retry. Use cancel_command only to stop the command."
+            ),
+        }
+
+
 class TaskManager:
     def __init__(
         self,
@@ -111,10 +126,9 @@ class TaskManager:
         return sorted(records, key=lambda item: item["started_at"])
 
     def idle(self, task: Path) -> None:
-        if any(
-            item["status"] not in execution.TERMINAL for item in self.commands(task)
-        ):
-            raise ValueError("A command is running; poll or cancel it first")
+        for command in self.commands(task):
+            if command["status"] not in execution.TERMINAL:
+                raise TaskBusyError(task.name, command)
 
     @staticmethod
     def status(record: dict, commands: list[dict]) -> str:
