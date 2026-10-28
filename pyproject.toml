@@ -29,3 +29,18 @@ default-groups = ["analysis"]
 name = "pypi"
 url = "https://pypi.org/simple"
 default = true
+
+# Preserve the supplied demo sources without applying project code checks.
+[tool.ty.src]
+exclude = [
+  "assets/knowledge/demo_flux/",
+  "assets/tools/demo_flux/",
+  "examples/demo_flux/",
+]
+
+[tool.ruff]
+extend-exclude = [
+  "assets/knowledge/demo_flux",
+  "assets/tools/demo_flux",
+  "examples/demo_flux",
+]
