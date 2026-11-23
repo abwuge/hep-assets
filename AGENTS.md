@@ -1,31 +1,31 @@
-# 项目约定
+# Project Guidelines
 
-## 文档
+## Documentation
 
-- README 面向使用者，只写项目用途、安装与使用方法、接口和影响使用的实际限制。
-- 项目根目录 README 使用中文，共享资产上层 README 使用英文；上层 README 只链接通用模块或资产类别；具体资产的路径、用法与说明留在其自身目录。
-- 不把会话背景、开发进度、演示顺序、临时定位、内部取舍或自我辩护写进 README。
-- 不添加“首个 demo”“用于前期演示”“不作为主体功能的必需依赖”等开发说明。
-- 开发约束放在本文件，不改写成面向使用者的介绍；没有内容时不添加占位章节。
+- Write all project documentation in English, including the root README and the shared assets README.
+- Keep READMEs focused on what the project does, how to install and use it, the interfaces it provides, and limitations that affect users.
+- Link only to general modules or asset categories from top-level READMEs. Document each asset's paths and usage in its own directory.
+- Keep conversation context, development progress, demo sequencing, temporary plans, and internal decisions out of READMEs.
+- Keep development constraints in this file. Omit sections with no content.
 
-## 开发边界
+## Development Scope
 
-- 高能物理领域资产体系是长期方向；当前处于 demo 阶段。
-- 分析工作区、数据传输和执行工具归属 `analysis/`，供 flux 等具体分析接入；具体 demo 的科学流程与通用工具分开。
-- 共享资产统一放在 `assets/`，按知识 `knowledge/`、工具 `tools/`、模型 `models/`、数据 `data/`、工作流（skill）`workflows/` 五类组织；数据类可存放数据或数据目录；当前材料用 `demo_flux` 命名，不绑定任务分类。任务从客户端上传，共享资产只读开放，不放完成解答。
-- analysis 不管理、选择或适配任何科学环境；具体工具和 demo 自行负责依赖与兼容。flux 的安装材料和软件放在 `assets/tools/demo_flux/`，按普通只读资产提供。原始完整示例保留在 `examples/`，不纳入共享资产暴露范围。
-- 自带 Hub 是可选组件，代码和说明放在 `hub/`，不加入默认依赖组。分析服务始终接入所选 Hub，不提供客户端独立接入模式；客户端通过 Hub 访问分析工具。
-- 服务端以 Linux 为主要部署目标；公共接口和业务逻辑保持平台无关，系统隔离集中适配 Linux 与 macOS，不以开发机系统限制服务启动。
-- 使用 uv 管理环境；依赖、路径和安装方式应让其他使用者能够重建，不引用维护者的私有文件或预装环境。
-- 保持实现和文件数量精简，不擅自引入 Docker、打包体系或额外平台。
-- `.gitignore` 中的忽略规则按用途分组，每组添加简短的分类注释；新增规则沿用已有分组风格。
-- 每次 commit 必须先由用户审核并明确批准。
+- The long-term goal is a shared asset system for high-energy physics. The project is currently at the demo stage.
+- Keep analysis workspaces, data transfer, and execution tools in `analysis/` for use by specific analyses. Keep scientific workflows separate from these general-purpose tools.
+- Organize shared assets under `assets/` in five categories: knowledge (`knowledge/`), tools (`tools/`), models (`models/`), data (`data/`), and workflows or skills (`workflows/`). The data category can contain datasets or data catalogs. Clients upload tasks, and shared assets are read-only. Keep completed solutions out of shared assets.
+- Each scientific tool or example manages its own dependencies and compatibility. Keep environment management out of `analysis/`. Distribute installation materials as read-only tool assets and keep complete examples outside the shared asset tree.
+- The bundled Hub is optional. Keep its code and documentation in `hub/` and its dependencies outside the default dependency group. The analysis service always registers with the selected Hub, and clients access analysis tools through that Hub.
+- Target Linux for server deployments. Keep public interfaces and application logic platform-independent, and centralize Linux and macOS isolation code. Support service startup on both platforms.
+- Use uv to manage the environment. Make dependencies, paths, and installation steps reproducible without relying on private files or a maintainer's preinstalled environment.
+- Keep the implementation and file count small. Obtain approval before introducing Docker, a packaging system, or an additional platform.
+- Group `.gitignore` rules by purpose and give each group a short comment. Follow the existing grouping style when adding rules.
+- Obtain the user's review and explicit approval before each commit.
 
-## 检查
+## Checks
 
-- 模块自身的测试放在该模块的 `tests/` 目录；跨模块集成测试放在项目根目录的 `tests/`。各模块测试可单独运行，使用各自需要的依赖。
+Put module tests in the corresponding module's `tests/` directory and cross-module integration tests in the repository's root `tests/` directory. Each module's tests must run independently with the dependencies they need.
 
-重构替换完成前，由智能体在代码或依赖变更后，在项目根目录执行：
+Until the refactor is complete, run these commands from the repository root after changing code or dependencies.
 
 ```sh
 uv lock --check
@@ -34,10 +34,9 @@ ruff check --select E,F,I,B,UP hub/
 uv format --check
 ```
 
-- `uv lock --check`：检查依赖声明与锁文件是否一致，不更新锁文件或安装依赖。
-- `uv check --group hub --locked`：使用 ty 检查类型，包含 Hub 依赖，禁止自动更新锁文件；可能同步虚拟环境。
-- `ruff check --select E,F,I,B,UP hub/`：检查常见错误、导入顺序、易错写法、部分代码风格和 Python 版本相关写法。
-- `uv format --check`：检查格式一致性，不修改源码。
+- `uv lock --check` verifies that the lockfile matches the dependency declarations without updating the lockfile or installing dependencies.
+- `uv check --group hub --locked` runs ty with the Hub dependency group and prevents automatic lockfile updates. It may sync the virtual environment.
+- `ruff check --select E,F,I,B,UP hub/` checks for common errors, import ordering, bug-prone patterns, selected style issues, and Python version compatibility.
+- `uv format --check` checks formatting without modifying files.
 
-检查失败时报告具体问题；未执行的检查需说明原因。不通过放宽规则、屏蔽错误或修改测试预期来掩盖问题。
-重构替换完成后，将这些检查迁入 CI；当前不新增 CI 配置。
+Report specific failures and explain why any check was skipped. Fix failures without weakening rules, suppressing errors, or changing test expectations to hide a problem. Move these checks into CI once the refactor is complete.

@@ -1,42 +1,42 @@
 # SCP Hub
 
-仓库自带的官方 SCP Hub，通过 Streamable HTTP 向客户端提供工具发现和调用。已有 Hub 时可直接使用，无需启动本组件。
+The repository bundles the official SCP Hub, which lets clients discover and call tools over Streamable HTTP. If you already have a Hub, use it directly.
 
-## 启动与连接
+## Start and connect
 
-在项目根目录运行：
+From the repository root, run:
 
 ```sh
 uv run python -m hub
 ```
 
-- 客户端 MCP URL：`http://127.0.0.1:46381/mcp`。
-- 内部 Hub API：`http://127.0.0.1:46380`。
+- The client MCP endpoint is `http://127.0.0.1:46381/mcp`.
+- The internal Hub API is at `http://127.0.0.1:46380`.
 
-停止启动器时，Hub 和 MCP 入口一起停止。
+Stopping the launcher shuts down both the Hub and the MCP endpoint.
 
-## 配置
+## Configuration
 
-| 参数 | 默认值 | 用途 |
+| Option | Default | Purpose |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | MCP 监听地址 |
-| `--port` | `46381` | MCP 端口 |
-| `--hub-port` | `46380` | 内部 Hub 端口 |
-| `--storage` | `hub/.local/` | 服务注册记录目录 |
+| `--host` | `127.0.0.1` | MCP bind address |
+| `--port` | `46381` | MCP port |
+| `--hub-port` | `46380` | Internal Hub port |
+| `--storage` | `hub/.local/` | Directory for service registration records |
 
-远程接入可设置 `--host 0.0.0.0`，客户端使用服务器 IP。公网部署需由反向代理提供 HTTPS 和认证，并限制内部 Hub 及其全接口监听的 PermissionServer 的访问。端口被占用时启动失败，需指定其他端口。
+For remote access, set `--host 0.0.0.0` and have clients connect using the server's IP address. For public deployments, use a reverse proxy for HTTPS and authentication. Restrict access to the internal Hub and to PermissionServer, which listens on all interfaces. If a port is already in use, choose a different one before starting the Hub.
 
-## 注册下游服务
+## Register downstream services
 
-分析服务默认注册到本机 Hub：
+The analysis service registers with the local Hub by default:
 
 ```sh
 uv run python -m analysis
 ```
 
-注册到其他 Hub 时使用 `--hub <Hub地址>`。
+Pass `--hub <hub-url>` to register with a different Hub.
 
-其他 SSE 服务启动后，可调用注册接口：
+To register another SSE service, start the service and call the registration endpoint:
 
 ```sh
 curl --fail http://127.0.0.1:46380/register_server \

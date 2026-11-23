@@ -1,39 +1,39 @@
-# 分析服务
+# Analysis Service
 
-为智能体提供工作区、共享资产读取、代码执行和结果文件。
+The analysis service gives agents isolated workspaces where they can read shared assets, run code, and produce result files.
 
-## 启动
+## Start the service
 
-Linux 需安装 Bubblewrap 并允许用户命名空间；macOS 使用系统自带的 `sandbox-exec`。
+On Linux, install Bubblewrap and enable user namespaces. On macOS, the service uses the built-in `sandbox-exec` utility.
 
-准备好 Hub 后，在项目根目录运行：
+Once the Hub is running, run this command from the repository root:
 
 ```sh
 uv run python -m analysis
 ```
 
-服务默认注册本机 Hub。使用其他 Hub 时添加 `--hub <Hub地址>`；客户端连接该 Hub 的 MCP 入口。
+The service registers with the local Hub by default. Pass `--hub <hub-url>` to register with a different Hub, then connect the client to that Hub's MCP endpoint.
 
-## 配置
+## Configuration
 
-| 参数 | 默认值 | 用途 |
+| Option | Default | Purpose |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | 监听地址 |
-| `--port` | `8001` | 服务端口 |
-| `--hub` | `http://127.0.0.1:46380` | 注册目标 Hub |
-| `--storage` | `analysis/.local/` | 任务存储目录 |
-| `--assets` | 项目根目录的 `assets/` | 只读共享资产目录 |
-| `--threads` | `2` | 数值库线程数 |
-| `--public-url` | 按监听地址生成 | 文件传输的外部访问地址 |
+| `--host` | `127.0.0.1` | Bind address |
+| `--port` | `8001` | Service port |
+| `--hub` | `http://127.0.0.1:46380` | Hub registration URL |
+| `--storage` | `analysis/.local/` | Task storage directory |
+| `--assets` | `assets/` at the repository root | Read-only shared asset directory |
+| `--threads` | `2` | Number of threads for numerical libraries |
+| `--public-url` | Derived from the bind address | External URL for file transfers |
 
-使用反向代理时，通过 `--public-url` 指定客户端可达的地址，并将该地址下的 `/files/` 转发至本服务。
+When using a reverse proxy, set `--public-url` to a URL clients can reach and forward requests under `/files/` at that URL to the analysis service.
 
-## 工作区
+## Workspace
 
-- `inputs/`：用户上传的文件，只读。
-- `work/`：分析代码和中间文件。
-- `outputs/`：结果和报告。
+- `inputs/` holds read-only files uploaded by the user.
+- `work/` holds analysis code and intermediate files.
+- `outputs/` holds results and reports.
 
-[共享资产](../assets/README.md)通过 `ASSETS_DIR` 读取。需要修改的资产先复制到 `work/`。
+Use `ASSETS_DIR` to read [shared assets](../assets/README.md). Copy any asset you need to modify into `work/` first.
 
-断开连接或重启服务不会取消正在运行的命令。重新连接后可继续查询任务，也可取消执行；取消后保留已有文件。
+Running commands survive client disconnections and service restarts. After reconnecting, you can check task status or cancel execution. Files already written remain available after cancellation.
